@@ -119,6 +119,8 @@
       color: #2b6cb0;
       border: 1.5px solid #bee3f8;
       padding: 9px 14px;
+      user-select: none;
+      -webkit-user-select: none;
     }
     .btn-mic.listening {
       background: #fed7d7;
@@ -306,7 +308,7 @@
       <!-- Single word + voice -->
       <div class="input-row">
         <input type="text" id="single-input" placeholder="输入一个词语，按 Enter 添加…" />
-        <button class="btn-mic" id="mic-btn" title="语音输入">🎤 语音</button>
+        <button class="btn-mic" id="mic-btn" title="按住说话，松开停止">🎤 按住说话</button>
         <button class="btn-primary" id="add-btn">添加</button>
       </div>
 
@@ -531,42 +533,70 @@
       if (confirm('确认清空所有词语？')) { words = []; renderWordList(); }
     });
 
-    // ── Mic input for adding words ─────────────────────────────────────────
+    // ── Mic input for adding words (hold-to-record) ───────────────────────
     let micListening = false;
-    micBtn.addEventListener('click', () => {
-      if (!hasSpeechRec) return;
-      if (micListening) {
-        micRec && micRec.stop();
-        return;
-      }
+
+    function startMicRecording() {
+      if (!hasSpeechRec || micListening) return;
       micRec = new SpeechRecognition();
       micRec.lang = langSelect.value;
       micRec.interimResults = false;
       micRec.maxAlternatives = 1;
-      micRec.continuous = false;
+      micRec.continuous = true;
 
       micRec.onstart = () => {
         micListening = true;
         micBtn.classList.add('listening');
-        micBtn.textContent = '🔴 停止';
+        micBtn.textContent = '🔴 松开停止';
       };
       micRec.onresult = e => {
-        const transcript = e.results[0][0].transcript.trim();
-        if (transcript) {
-          singleInput.value = transcript;
-          addBtn.click();
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) {
+            const transcript = e.results[i][0].transcript.trim();
+            if (transcript) {
+              // Split by whitespace / Chinese punctuation so each spoken word
+              // becomes a separate entry; fall back to the whole transcript as one word.
+              const tokens = transcript.split(/[\s,，、。！？\u3000]+/).filter(Boolean);
+              const wordsSet = new Set(words);
+              tokens.forEach(t => {
+                if (!wordsSet.has(t)) { words.push(t); wordsSet.add(t); }
+              });
+              renderWordList();
+            }
+          }
         }
       };
       micRec.onerror = e => {
-        setStatus(`语音输入出错: ${e.error}`, '');
+        if (e.error !== 'no-speech') {
+          setStatus(`语音输入出错: ${e.error}`, '');
+        }
       };
       micRec.onend = () => {
         micListening = false;
         micBtn.classList.remove('listening');
-        micBtn.textContent = '🎤 语音';
+        micBtn.textContent = '🎤 按住说话';
       };
       micRec.start();
+    }
+
+    function stopMicRecording() {
+      if (micRec) {
+        try { micRec.stop(); } catch (e) { console.warn('stopMic:', e); }
+      }
+    }
+
+    micBtn.addEventListener('mousedown', e => {
+      e.preventDefault();
+      startMicRecording();
     });
+    micBtn.addEventListener('mouseup', () => { if (micListening) stopMicRecording(); });
+    micBtn.addEventListener('mouseleave', () => { if (micListening) stopMicRecording(); });
+    micBtn.addEventListener('touchstart', e => {
+      e.preventDefault();
+      startMicRecording();
+    }, { passive: false });
+    micBtn.addEventListener('touchend', stopMicRecording);
+    micBtn.addEventListener('touchcancel', stopMicRecording);
 
     // ── Dictation ──────────────────────────────────────────────────────────
     function buildPlaylist() {

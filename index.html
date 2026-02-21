@@ -540,7 +540,7 @@
       if (!hasSpeechRec || micListening) return;
       micRec = new SpeechRecognition();
       micRec.lang = langSelect.value;
-      micRec.interimResults = false;
+      micRec.interimResults = true;
       micRec.maxAlternatives = 1;
       micRec.continuous = true;
 
@@ -551,8 +551,9 @@
       };
       micRec.onresult = e => {
         for (let i = e.resultIndex; i < e.results.length; i++) {
+          const transcript = e.results[i][0].transcript.trim();
           if (e.results[i].isFinal) {
-            const transcript = e.results[i][0].transcript.trim();
+            singleInput.value = '';
             if (transcript) {
               // Split by whitespace / Chinese punctuation so each spoken word
               // becomes a separate entry; fall back to the whole transcript as one word.
@@ -563,6 +564,8 @@
               });
               renderWordList();
             }
+          } else {
+            singleInput.value = transcript;
           }
         }
       };
@@ -759,8 +762,10 @@
       if (!hasSpeechRec) return;
       voiceNextRec = new SpeechRecognition();
       voiceNextRec.lang = langSelect.value;
-      voiceNextRec.interimResults = false;
+      voiceNextRec.interimResults = true;
       voiceNextRec.continuous = true;
+
+      const actedIndices = new Set();
 
       voiceNextRec.onstart = () => {
         voiceNextListening = true;
@@ -770,13 +775,17 @@
       };
       voiceNextRec.onresult = e => {
         for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (actedIndices.has(i)) continue;
           const t = e.results[i][0].transcript.trim().toLowerCase();
           if (t.includes('下一个') || t.includes('next') || t.includes('下一') || t.includes('继续')) {
             goNext();
+            actedIndices.add(i);
           } else if (t.includes('上一个') || t.includes('previous') || t.includes('上一') || t.includes('back')) {
             goPrev();
+            actedIndices.add(i);
           } else if (t.includes('重播') || t.includes('replay') || t.includes('再说一遍')) {
             if (running && currentIdx >= 0) playCurrentWord();
+            actedIndices.add(i);
           }
         }
       };
@@ -786,6 +795,7 @@
       voiceNextRec.onend = () => {
         // auto-restart if still supposed to be listening
         if (voiceNextListening && running) {
+          actedIndices.clear();
           try { voiceNextRec.start(); } catch(e) { console.warn('voiceNext restart:', e); }
         }
       };

@@ -870,14 +870,12 @@
         utt.pitch  = pitch;
         utt.volume = volume;
         if (voice) utt.voice = voice;
-        utt.onstart = () => {
-          setStatus(`🔊 朗读中… "${word}"`, 'speaking');
-          // Keep iOS speechSynthesis alive – iOS pauses synthesis after ~15 s
-          synthKeepAliveTimer = setInterval(() => {
-            if (synth.paused) synth.resume();
-          }, 5000);
-        };
-        utt.onend = () => {
+        let uttDone = false;
+        let uttFallback = null;
+        function finishUtt() {
+          if (uttDone) return;
+          uttDone = true;
+          if (uttFallback) { clearTimeout(uttFallback); uttFallback = null; }
           if (synthKeepAliveTimer) { clearInterval(synthKeepAliveTimer); synthKeepAliveTimer = null; }
           count++;
           if (count < repeats) {
@@ -886,15 +884,32 @@
             setStatus('等待下一个… Waiting for next', '');
             onDone && onDone();
           }
+        }
+        utt.onstart = () => {
+          setStatus(`🔊 朗读中… "${word}"`, 'speaking');
+          // Keep iOS speechSynthesis alive – iOS pauses synthesis after ~15 s
+          synthKeepAliveTimer = setInterval(() => {
+            if (synth.paused) synth.resume();
+          }, 5000);
+          // Android Chrome workaround: onend sometimes never fires.
+          // Estimate speech duration: ~600 ms/char at rate=1 (generous),
+          // minimum 5 s, plus 3 s buffer – then force-complete if onend
+          // hasn't fired yet.
+          const estimatedMs = Math.max(5000, (word.length / rate) * 600) + 3000;
+          uttFallback = setTimeout(finishUtt, estimatedMs);
         };
+        utt.onend = finishUtt;
         utt.onerror = () => {
+          if (uttDone) return;
+          uttDone = true;
+          if (uttFallback) { clearTimeout(uttFallback); uttFallback = null; }
           if (synthKeepAliveTimer) { clearInterval(synthKeepAliveTimer); synthKeepAliveTimer = null; }
           onDone && onDone();
         };
         synth.speak(utt);
       }
-      // Small delay after cancel() for iOS Safari: speak() called too soon after
-      // cancel() may silently fail on some iOS versions.
+      // Small delay after cancel() for iOS/Android: speak() called too soon after
+      // cancel() may silently fail on some versions.
       setTimeout(speakOnce, 50);
     }
 

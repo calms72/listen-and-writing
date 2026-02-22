@@ -545,9 +545,10 @@
     let playlist     = [];   // ordered / shuffled copy used for current session
     let currentIdx   = -1;
     let running      = false;
-    let synth        = window.speechSynthesis;
-    let voiceNextRec = null; // SpeechRecognition for "next" voice command
-    let micRec       = null; // SpeechRecognition for word input
+    let synth              = window.speechSynthesis;
+    let voiceNextRec       = null; // SpeechRecognition for "next" voice command
+    let micRec             = null; // SpeechRecognition for word input
+    let synthKeepAliveTimer = null; // timer to keep iOS speechSynthesis awake
 
     // ── Element refs ───────────────────────────────────────────────────────
     const singleInput    = document.getElementById('single-input');
@@ -744,14 +745,22 @@
         }
       };
       micRec.onerror = e => {
-        if (e.error !== 'no-speech') {
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+          // Fatal permission error – stop to avoid an infinite restart loop
+          stopMicRecording();
+          setStatus(`语音输入出错: ${e.error}`, '');
+        } else if (e.error !== 'no-speech') {
           setStatus(`语音输入出错: ${e.error}`, '');
         }
       };
       micRec.onend = () => {
-        // Auto-restart to keep listening until user clicks stop
-        if (micListening && micRec) {
-          try { micRec.start(); } catch (e) { console.warn('micRec restart:', e); }
+        // Auto-restart to keep listening until user clicks stop.
+        // Create a fresh instance each time: iOS Safari cannot reuse a
+        // SpeechRecognition object after it has ended.
+        if (micListening) {
+          micRec = null;
+          micListening = false;
+          startMicRecording();
         } else {
           micBtn.classList.remove('listening');
           micBtn.textContent = '🎤 点击说话';
@@ -843,6 +852,8 @@
 
     function speakWord(word, onDone) {
       synth.cancel();
+      // Clear any previous keep-alive timer
+      if (synthKeepAliveTimer) { clearInterval(synthKeepAliveTimer); synthKeepAliveTimer = null; }
       const repeats = parseInt(repeatInput.value, 10) || 1;
       const rate    = parseFloat(rateSelect.value) || 1;
       const lang    = langSelect.value;
@@ -859,8 +870,15 @@
         utt.pitch  = pitch;
         utt.volume = volume;
         if (voice) utt.voice = voice;
-        utt.onstart = () => setStatus(`🔊 朗读中… "${word}"`, 'speaking');
+        utt.onstart = () => {
+          setStatus(`🔊 朗读中… "${word}"`, 'speaking');
+          // Keep iOS speechSynthesis alive – iOS pauses synthesis after ~15 s
+          synthKeepAliveTimer = setInterval(() => {
+            if (synth.paused) synth.resume();
+          }, 5000);
+        };
         utt.onend = () => {
+          if (synthKeepAliveTimer) { clearInterval(synthKeepAliveTimer); synthKeepAliveTimer = null; }
           count++;
           if (count < repeats) {
             setTimeout(speakOnce, 400);
@@ -869,10 +887,15 @@
             onDone && onDone();
           }
         };
-        utt.onerror = () => { onDone && onDone(); };
+        utt.onerror = () => {
+          if (synthKeepAliveTimer) { clearInterval(synthKeepAliveTimer); synthKeepAliveTimer = null; }
+          onDone && onDone();
+        };
         synth.speak(utt);
       }
-      speakOnce();
+      // Small delay after cancel() for iOS Safari: speak() called too soon after
+      // cancel() may silently fail on some iOS versions.
+      setTimeout(speakOnce, 50);
     }
 
     function highlightActiveWord(playlistIndex) {
@@ -972,13 +995,22 @@
         }
       };
       voiceNextRec.onerror = e => {
-        if (e.error !== 'no-speech') setStatus(`语音命令出错: ${e.error}`, '');
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+          // Fatal permission error – stop to avoid an infinite restart loop
+          stopVoiceNext();
+          setStatus(`语音命令出错: ${e.error}`, '');
+        } else if (e.error !== 'no-speech') {
+          setStatus(`语音命令出错: ${e.error}`, '');
+        }
       };
       voiceNextRec.onend = () => {
-        // auto-restart if still supposed to be listening
+        // auto-restart if still supposed to be listening.
+        // Create a fresh instance each time: iOS Safari cannot reuse a
+        // SpeechRecognition object after it has ended.
         if (voiceNextListening && running) {
-          actedIndices.clear();
-          try { voiceNextRec.start(); } catch(e) { console.warn('voiceNext restart:', e); }
+          voiceNextRec = null;
+          voiceNextListening = false;
+          startVoiceNext();
         }
       };
       voiceNextRec.start();

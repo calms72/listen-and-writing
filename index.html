@@ -415,7 +415,7 @@
       <!-- Single word + voice -->
       <div class="input-row">
         <input type="text" id="single-input" placeholder="输入一个词语，按 Enter 添加…" />
-        <button class="btn-mic" id="mic-btn" title="按住说话，松开停止">🎤 按住说话</button>
+        <button class="btn-mic" id="mic-btn" title="点击开始/停止语音输入">🎤 点击说话</button>
         <button class="btn-primary" id="add-btn">添加</button>
       </div>
 
@@ -707,7 +707,7 @@
       if (confirm('确认清空所有词语？')) { words = []; renderWordList(); }
     });
 
-    // ── Mic input for adding words (hold-to-record) ───────────────────────
+    // ── Mic input for adding words (click-to-toggle) ──────────────────────
     let micListening = false;
 
     function startMicRecording() {
@@ -721,7 +721,7 @@
       micRec.onstart = () => {
         micListening = true;
         micBtn.classList.add('listening');
-        micBtn.textContent = '🔴 松开停止';
+        micBtn.textContent = '🔴 点击停止';
       };
       micRec.onresult = e => {
         for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -749,31 +749,28 @@
         }
       };
       micRec.onend = () => {
-        micListening = false;
-        micBtn.classList.remove('listening');
-        micBtn.textContent = '🎤 按住说话';
+        // Auto-restart to keep listening until user clicks stop
+        if (micListening && micRec) {
+          try { micRec.start(); } catch (e) { console.warn('micRec restart:', e); }
+        } else {
+          micBtn.classList.remove('listening');
+          micBtn.textContent = '🎤 点击说话';
+        }
       };
       micRec.start();
     }
 
     function stopMicRecording() {
+      micListening = false;
       if (micRec) {
         try { micRec.stop(); } catch (e) { console.warn('stopMic:', e); }
+        micRec = null;
       }
     }
 
-    micBtn.addEventListener('mousedown', e => {
-      e.preventDefault();
-      startMicRecording();
+    micBtn.addEventListener('click', () => {
+      if (micListening) { stopMicRecording(); } else { startMicRecording(); }
     });
-    micBtn.addEventListener('mouseup', () => { if (micListening) stopMicRecording(); });
-    micBtn.addEventListener('mouseleave', () => { if (micListening) stopMicRecording(); });
-    micBtn.addEventListener('touchstart', e => {
-      e.preventDefault();
-      startMicRecording();
-    }, { passive: false });
-    micBtn.addEventListener('touchend', stopMicRecording);
-    micBtn.addEventListener('touchcancel', stopMicRecording);
 
     // ── Dictation ──────────────────────────────────────────────────────────
     function buildPlaylist() {
